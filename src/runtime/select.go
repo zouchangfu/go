@@ -118,11 +118,18 @@ func block() {
 // ordinal position of its respective select{recv,send,default} call.
 // Also, if the chosen scase was a receive operation, it reports whether
 // a value was received.
+
+// selectgo 分为四个阶段
+// 1.产生随机数组索引，给所有case中的chanel上锁
+// 2.遍历随机数组索引，然后获取case中的channel进行收发工作
+// 3.把当前协程加入到channel的收发队列上
+// 4.协程被唤醒找到满足条件的channel进行处理
 func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, block bool) (int, bool) {
+	// 1.第一阶段开始---------------------------------------------------------------------------------------
+	// 产生随机数组索引，给所有case中的chanel上锁
 	if debugSelect {
 		print("select: cas0=", cas0, "\n")
 	}
-
 	// NOTE: In order to maintain a lean stack size, the number of scases
 	// is capped at 65536.
 	cas1 := (*[1 << 16]scase)(unsafe.Pointer(cas0))
@@ -173,6 +180,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 			continue
 		}
 
+		// 产生随机索引
 		j := fastrandn(uint32(norder + 1))
 		pollorder[norder] = pollorder[j]
 		pollorder[j] = uint16(i)
@@ -183,6 +191,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 
 	// sort the cases by Hchan address to get the locking order.
 	// simple heap sort, to guarantee n log n time and constant stack footprint.
+	// 计算channel的上锁顺序
 	for i := range lockorder {
 		j := i
 		// Start with the pollorder to permute cases on the same channel.
@@ -227,8 +236,13 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	}
 
 	// lock all the channels involved in the select
+	// 给所有的channel进行上锁
 	sellock(scases, lockorder)
 
+	// 第一阶段结束---------------------------------------------------------------------------------------
+
+	// 第二阶段开始---------------------------------------------------------------------------------------
+	// 遍历随机数组索引，然后获取case中的channel进行收发工作
 	var (
 		gp     *g
 		sg     *sudog
@@ -246,33 +260,52 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	var caseSuccess bool
 	var caseReleaseTime int64 = -1
 	var recvOK bool
+
+	// 遍历随机索引
 	for _, casei := range pollorder {
 		casi = int(casei)
+		// 获取case对象
 		cas = &scases[casi]
+
+		// 获取channel
 		c = cas.c
 
+		// 如果casi打印nsends代表为接收数据
 		if casi >= nsends {
+			// 如果队列发送队列有数据，则直接读取数据
 			sg = c.sendq.dequeue()
 			if sg != nil {
 				goto recv
 			}
+
+			// 如果发送队列没有数据，但是channel中有数据，直接读取缓存中的数据
 			if c.qcount > 0 {
 				goto bufrecv
 			}
+
+			// 如果channel已经关闭，跳转到rclose做收尾工作
 			if c.closed != 0 {
 				goto rclose
 			}
+
+			// 进入else代表为发送数据
 		} else {
 			if raceenabled {
 				racereadpc(c.raceaddr(), casePC(casi), chansendpc)
 			}
+
+			// 如果channel已经关闭，跳转到sclose，并调用panic函数
 			if c.closed != 0 {
 				goto sclose
 			}
+
+			// 如果接收队列有数据，获取一个队列的协程，把数据写道该协程中
 			sg = c.recvq.dequeue()
 			if sg != nil {
 				goto send
 			}
+
+			// 如果channel的循环链表没有满，则发送数据到链表中
 			if c.qcount < c.dataqsiz {
 				goto bufsend
 			}
@@ -284,18 +317,32 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		casi = -1
 		goto retc
 	}
+	// 第二阶段结束---------------------------------------------------------------------------------------
 
+	// 第三阶段开始---------------------------------------------------------------------------------------
+	// 把当前协程加入到channel的收发队列上
 	// pass 2 - enqueue on all chans
+	// 获取当前协程
 	gp = getg()
 	if gp.waiting != nil {
 		throw("gp.waiting != nil")
 	}
+
+	// 把当前协程的sg赋值给nextp
 	nextp = &gp.waiting
+
+	// 按顺序遍历所有的scase
 	for _, casei := range lockorder {
 		casi = int(casei)
 		cas = &scases[casi]
+
+		// 获取当前case的channel
 		c = cas.c
+
+		// 创建sudog对象
 		sg := acquireSudog()
+
+		// 把当前协程挂载到sudog中
 		sg.g = gp
 		sg.isSelect = true
 		// No stack splits between assigning elem and enqueuing
@@ -305,18 +352,27 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		if t0 != 0 {
 			sg.releasetime = -1
 		}
+
+		// 把channel挂载到sg中
 		sg.c = c
 		// Construct waiting list in lock order.
+
+		// 把sg赋值给nextp
 		*nextp = sg
 		nextp = &sg.waitlink
 
 		if casi < nsends {
+			// 添加到发送队列中
 			c.sendq.enqueue(sg)
 		} else {
+			// 添加到接收队列中
 			c.recvq.enqueue(sg)
 		}
 	}
+	// 第三阶段结束---------------------------------------------------------------------------------------
 
+	// 第四阶段开始---------------------------------------------------------------------------------------
+	// 协程被唤醒找到满足条件的channel进行处理
 	// wait for someone to wake us up
 	gp.param = nil
 	// Signal to anyone trying to shrink our stack that we're about
@@ -415,6 +471,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 
 	selunlock(scases, lockorder)
 	goto retc
+	// 第四阶段结束---------------------------------------------------------------------------------------
 
 bufrecv:
 	// can receive from buffer
