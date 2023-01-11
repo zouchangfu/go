@@ -312,6 +312,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		}
 	}
 
+	// 如果上面的条件都没有符合的话，才会执行到这里
+	// 如果不需要阻塞的话，直接返回
 	if !block {
 		selunlock(scases, lockorder)
 		casi = -1
@@ -320,6 +322,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	// 第二阶段结束---------------------------------------------------------------------------------------
 
 	// 第三阶段开始---------------------------------------------------------------------------------------
+	// 上面第二个阶段所有的条件都不满足，才走到这里
 	// 把当前协程加入到channel的收发队列上
 	// pass 2 - enqueue on all chans
 	// 获取当前协程
@@ -372,7 +375,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	// 第三阶段结束---------------------------------------------------------------------------------------
 
 	// 第四阶段开始---------------------------------------------------------------------------------------
-	// 协程被唤醒找到满足条件的channel进行处理
+	// 挂起协程，等待协程被唤醒找到满足条件的channel进行处理
 	// wait for someone to wake us up
 	gp.param = nil
 	// Signal to anyone trying to shrink our stack that we're about
@@ -380,6 +383,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	// changes and when we set gp.activeStackChans is not safe for
 	// stack shrinking.
 	gp.parkingOnChan.Store(true)
+
+	// 挂起协程，等待被唤醒
 	gopark(selparkcommit, nil, waitReasonSelect, traceEvGoBlockSelect, 1)
 	gp.activeStackChans = false
 
@@ -405,6 +410,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	}
 	gp.waiting = nil
 
+	// 按照锁的顺序，遍历所有的case
+	// 查找需要被处理的runtime.sudog
 	for _, casei := range lockorder {
 		k = &scases[casei]
 		if sg == sglist {
@@ -604,6 +611,8 @@ func reflect_rselect(cases []runtimeSelect) (int, bool) {
 	orig := make([]int, len(cases))
 	nsends, nrecvs := 0, 0
 	dflt := -1
+
+	// 遍历所有的cases，这里的cases应该是编译后的cases
 	for i, rc := range cases {
 		var j int
 		switch rc.dir {
@@ -643,6 +652,7 @@ func reflect_rselect(cases []runtimeSelect) (int, bool) {
 		pc0 = &pcs[0]
 	}
 
+	// dflt == -1 ，判断是否需要进行阻塞
 	chosen, recvOK := selectgo(&sel[0], &order[0], pc0, nsends, nrecvs, dflt == -1)
 
 	// Translate chosen back to caller's ordering.
