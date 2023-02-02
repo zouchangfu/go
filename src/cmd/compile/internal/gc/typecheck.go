@@ -199,7 +199,8 @@ var typecheck_tcstack []*Node
 
 // typecheck type checks node n.
 // The result of typecheck MUST be assigned back to n, e.g.
-// 	n.Left = typecheck(n.Left, top)
+//
+//	n.Left = typecheck(n.Left, top)
 func typecheck(n *Node, top int) (res *Node) {
 	// cannot type check until all the source has been parsed
 	if !typecheckok {
@@ -314,7 +315,8 @@ func typecheck(n *Node, top int) (res *Node) {
 // but also accepts untyped numeric values representable as
 // value of type int (see also checkmake for comparison).
 // The result of indexlit MUST be assigned back to n, e.g.
-// 	n.Left = indexlit(n.Left)
+//
+//	n.Left = indexlit(n.Left)
 func indexlit(n *Node) *Node {
 	if n != nil && n.Type != nil && n.Type.Etype == TIDEAL {
 		return defaultlit(n, types.Types[TINT])
@@ -323,7 +325,8 @@ func indexlit(n *Node) *Node {
 }
 
 // The result of typecheck1 MUST be assigned back to n, e.g.
-// 	n.Left = typecheck1(n.Left, top)
+//
+//	n.Left = typecheck1(n.Left, top)
 func typecheck1(n *Node, top int) (res *Node) {
 	if enableTrace && trace {
 		defer tracePrint("typecheck1", n)(&res)
@@ -1645,6 +1648,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 			return n
 		}
 
+		// 检查操作
 		switch n.Op {
 		case OCONVNOP:
 			if t.Etype == n.Type.Etype {
@@ -1667,8 +1671,11 @@ func typecheck1(n *Node, top int) (res *Node) {
 			}
 		}
 
+		// 判断当前的类型是否是make函数操作
 	case OMAKE:
 		ok |= ctxExpr
+
+		// 获取参数列表
 		args := n.List.Slice()
 		if len(args) == 0 {
 			yyerror("missing argument to make")
@@ -1686,12 +1693,15 @@ func typecheck1(n *Node, top int) (res *Node) {
 		}
 
 		i := 1
+
+		// 判断当前make的类型
 		switch t.Etype {
 		default:
 			yyerror("cannot make type %v", t)
 			n.Type = nil
 			return n
 
+			// 切片类型
 		case TSLICE:
 			if i >= len(args) {
 				yyerror("missing len argument to make(%v)", t)
@@ -1727,6 +1737,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 			n.Right = r
 			n.Op = OMAKESLICE
 
+			// map类型
 		case TMAP:
 			if i < len(args) {
 				l = args[i]
@@ -1747,9 +1758,13 @@ func typecheck1(n *Node, top int) (res *Node) {
 			}
 			n.Op = OMAKEMAP
 
+			// chan类型
 		case TCHAN:
 			l = nil
+			// 带缓冲的channel
+			// 这里的i=1，如果make函数的参数大于1，证明这个make函数创建的是一个带有长度的channel
 			if i < len(args) {
+				// 获取长度
 				l = args[i]
 				i++
 				l = typecheck(l, ctxExpr)
@@ -1763,9 +1778,12 @@ func typecheck1(n *Node, top int) (res *Node) {
 					return n
 				}
 				n.Left = l
+				// 无缓冲channel
 			} else {
 				n.Left = nodintconst(0)
 			}
+
+			// 这个时候的操作转换为 OMAKECHAN
 			n.Op = OMAKECHAN
 		}
 
@@ -2217,7 +2235,8 @@ func checkdefergo(n *Node) {
 }
 
 // The result of implicitstar MUST be assigned back to n, e.g.
-// 	n.Left = implicitstar(n.Left)
+//
+//	n.Left = implicitstar(n.Left)
 func implicitstar(n *Node) *Node {
 	// insert implicit * if needed for fixed array
 	t := n.Type
@@ -2751,7 +2770,8 @@ func pushtype(n *Node, t *types.Type) *Node {
 }
 
 // The result of typecheckcomplit MUST be assigned back to n, e.g.
-// 	n.Left = typecheckcomplit(n.Left)
+//
+//	n.Left = typecheckcomplit(n.Left)
 func typecheckcomplit(n *Node) (res *Node) {
 	if enableTrace && trace {
 		defer tracePrint("typecheckcomplit", n)(&res)
@@ -3103,11 +3123,11 @@ func checkassignlist(stmt *Node, l Nodes) {
 // instead of computing both. samesafeexpr assumes that l and r are
 // used in the same statement or expression. In order for it to be
 // safe to reuse l or r, they must:
-// * be the same expression
-// * not have side-effects (no function calls, no channel ops);
-//   however, panics are ok
-// * not cause inappropriate aliasing; e.g. two string to []byte
-//   conversions, must result in two distinct slices
+//   - be the same expression
+//   - not have side-effects (no function calls, no channel ops);
+//     however, panics are ok
+//   - not cause inappropriate aliasing; e.g. two string to []byte
+//     conversions, must result in two distinct slices
 //
 // The handling of OINDEXMAP is subtle. OINDEXMAP can occur both
 // as an lvalue (map assignment) and an rvalue (map access). This is
@@ -3377,7 +3397,8 @@ func typecheckfunc(n *Node) {
 }
 
 // The result of stringtoruneslit MUST be assigned back to n, e.g.
-// 	n.Left = stringtoruneslit(n.Left)
+//
+//	n.Left = stringtoruneslit(n.Left)
 func stringtoruneslit(n *Node) *Node {
 	if n.Left.Op != OLITERAL || n.Left.Val().Ctype() != CTSTR {
 		Fatalf("stringtoarraylit %v", n)

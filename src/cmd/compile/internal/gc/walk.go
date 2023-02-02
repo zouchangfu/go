@@ -111,7 +111,8 @@ func paramoutheap(fn *Node) bool {
 }
 
 // The result of walkstmt MUST be assigned back to n, e.g.
-// 	n.Left = walkstmt(n.Left)
+//
+//	n.Left = walkstmt(n.Left)
 func walkstmt(n *Node) *Node {
 	if n == nil {
 		return n
@@ -435,7 +436,8 @@ func convFuncName(from, to *types.Type) (fnname string, needsaddr bool) {
 }
 
 // The result of walkexpr MUST be assigned back to n, e.g.
-// 	n.Left = walkexpr(n.Left, init)
+//
+//	n.Left = walkexpr(n.Left, init)
 func walkexpr(n *Node, init *Nodes) *Node {
 	if n == nil {
 		return n
@@ -1489,11 +1491,13 @@ opswitch:
 		anylit(n, var_, init)
 		n = var_
 
+		// ch <- i 转换为被编译为OSEND
 	case OSEND:
 		n1 := n.Right
 		n1 = assignconv(n1, n.Left.Type.Elem(), "chan send")
 		n1 = walkexpr(n1, init)
 		n1 = nod(OADDR, n1, nil)
+		// 后续发送会使用到chansend1
 		n = mkcall1(chanfn("chansend1", 2, n.Left.Type), nil, init, n.Left, n1)
 
 	case OCLOSURE:
@@ -1658,6 +1662,7 @@ func fncall(l *Node, rt *types.Type) bool {
 
 // check assign type list to
 // an expression list. called in
+//
 //	expr-list = func()
 func ascompatet(nl Nodes, nr *types.Type) []*Node {
 	if nl.Len() != nr.NumFields() {
@@ -1996,7 +2001,9 @@ func convas(n *Node, init *Nodes) *Node {
 }
 
 // from ascompat[ee]
+//
 //	a,b = c,d
+//
 // simultaneous assignment. there cannot
 // be later use of an earlier lvalue.
 //
@@ -2059,7 +2066,8 @@ func reorder3(all []*Node) []*Node {
 // copy into a temporary during *early and
 // replace *np with that temp.
 // The result of reorder3save MUST be assigned back to n, e.g.
-// 	n.Left = reorder3save(n.Left, all, i, early)
+//
+//	n.Left = reorder3save(n.Left, all, i, early)
 func reorder3save(n *Node, all []*Node, i int, early *[]*Node) *Node {
 	if !aliased(n, all, i) {
 		return n
@@ -2601,17 +2609,18 @@ func walkAppendArgs(n *Node, init *Nodes) {
 }
 
 // expand append(l1, l2...) to
-//   init {
-//     s := l1
-//     n := len(s) + len(l2)
-//     // Compare as uint so growslice can panic on overflow.
-//     if uint(n) > uint(cap(s)) {
-//       s = growslice(s, n)
-//     }
-//     s = s[:n]
-//     memmove(&s[len(l1)], &l2[0], len(l2)*sizeof(T))
-//   }
-//   s
+//
+//	init {
+//	  s := l1
+//	  n := len(s) + len(l2)
+//	  // Compare as uint so growslice can panic on overflow.
+//	  if uint(n) > uint(cap(s)) {
+//	    s = growslice(s, n)
+//	  }
+//	  s = s[:n]
+//	  memmove(&s[len(l1)], &l2[0], len(l2)*sizeof(T))
+//	}
+//	s
 //
 // l2 is allowed to be a string.
 func appendslice(n *Node, init *Nodes) *Node {
@@ -2746,32 +2755,33 @@ func isAppendOfMake(n *Node) bool {
 }
 
 // extendslice rewrites append(l1, make([]T, l2)...) to
-//   init {
-//     if l2 >= 0 { // Empty if block here for more meaningful node.SetLikely(true)
-//     } else {
-//       panicmakeslicelen()
-//     }
-//     s := l1
-//     n := len(s) + l2
-//     // Compare n and s as uint so growslice can panic on overflow of len(s) + l2.
-//     // cap is a positive int and n can become negative when len(s) + l2
-//     // overflows int. Interpreting n when negative as uint makes it larger
-//     // than cap(s). growslice will check the int n arg and panic if n is
-//     // negative. This prevents the overflow from being undetected.
-//     if uint(n) > uint(cap(s)) {
-//       s = growslice(T, s, n)
-//     }
-//     s = s[:n]
-//     lptr := &l1[0]
-//     sptr := &s[0]
-//     if lptr == sptr || !hasPointers(T) {
-//       // growslice did not clear the whole underlying array (or did not get called)
-//       hp := &s[len(l1)]
-//       hn := l2 * sizeof(T)
-//       memclr(hp, hn)
-//     }
-//   }
-//   s
+//
+//	init {
+//	  if l2 >= 0 { // Empty if block here for more meaningful node.SetLikely(true)
+//	  } else {
+//	    panicmakeslicelen()
+//	  }
+//	  s := l1
+//	  n := len(s) + l2
+//	  // Compare n and s as uint so growslice can panic on overflow of len(s) + l2.
+//	  // cap is a positive int and n can become negative when len(s) + l2
+//	  // overflows int. Interpreting n when negative as uint makes it larger
+//	  // than cap(s). growslice will check the int n arg and panic if n is
+//	  // negative. This prevents the overflow from being undetected.
+//	  if uint(n) > uint(cap(s)) {
+//	    s = growslice(T, s, n)
+//	  }
+//	  s = s[:n]
+//	  lptr := &l1[0]
+//	  sptr := &s[0]
+//	  if lptr == sptr || !hasPointers(T) {
+//	    // growslice did not clear the whole underlying array (or did not get called)
+//	    hp := &s[len(l1)]
+//	    hn := l2 * sizeof(T)
+//	    memclr(hp, hn)
+//	  }
+//	}
+//	s
 func extendslice(n *Node, init *Nodes) *Node {
 	// isAppendOfMake made sure all possible positive values of l2 fit into an uint.
 	// The case of l2 overflow when converting from e.g. uint to int is handled by an explicit
@@ -2878,19 +2888,19 @@ func extendslice(n *Node, init *Nodes) *Node {
 //
 // For race detector, expand append(src, a [, b]* ) to
 //
-//   init {
-//     s := src
-//     const argc = len(args) - 1
-//     if cap(s) - len(s) < argc {
-//	    s = growslice(s, len(s)+argc)
-//     }
-//     n := len(s)
-//     s = s[:n+argc]
-//     s[n] = a
-//     s[n+1] = b
-//     ...
-//   }
-//   s
+//	  init {
+//	    s := src
+//	    const argc = len(args) - 1
+//	    if cap(s) - len(s) < argc {
+//		    s = growslice(s, len(s)+argc)
+//	    }
+//	    n := len(s)
+//	    s = s[:n+argc]
+//	    s[n] = a
+//	    s[n+1] = b
+//	    ...
+//	  }
+//	  s
 func walkappend(n *Node, init *Nodes, dst *Node) *Node {
 	if !samesafeexpr(dst, n.List.First()) {
 		n.List.SetFirst(safeexpr(n.List.First(), init))
@@ -2971,15 +2981,15 @@ func walkappend(n *Node, init *Nodes, dst *Node) *Node {
 
 // Lower copy(a, b) to a memmove call or a runtime call.
 //
-// init {
-//   n := len(a)
-//   if n > len(b) { n = len(b) }
-//   if a.ptr != b.ptr { memmove(a.ptr, b.ptr, n*sizeof(elem(a))) }
-// }
+//	init {
+//	  n := len(a)
+//	  if n > len(b) { n = len(b) }
+//	  if a.ptr != b.ptr { memmove(a.ptr, b.ptr, n*sizeof(elem(a))) }
+//	}
+//
 // n;
 //
 // Also works if b is a string.
-//
 func copyany(n *Node, init *Nodes, runtimecall bool) *Node {
 	if n.Left.Type.Elem().HasHeapPointer() {
 		Curfn.Func.setWBPos(n.Pos)
@@ -3070,7 +3080,8 @@ func eqfor(t *types.Type) (n *Node, needsize bool) {
 }
 
 // The result of walkcompare MUST be assigned back to n, e.g.
-// 	n.Left = walkcompare(n.Left, init)
+//
+//	n.Left = walkcompare(n.Left, init)
 func walkcompare(n *Node, init *Nodes) *Node {
 	if n.Left.Type.IsInterface() && n.Right.Type.IsInterface() && n.Left.Op != OLITERAL && n.Right.Op != OLITERAL {
 		return walkcompareInterface(n, init)
@@ -3506,7 +3517,8 @@ func walkcompareString(n *Node, init *Nodes) *Node {
 }
 
 // The result of finishcompare MUST be assigned back to n, e.g.
-// 	n.Left = finishcompare(n.Left, x, r, init)
+//
+//	n.Left = finishcompare(n.Left, x, r, init)
 func finishcompare(n, r *Node, init *Nodes) *Node {
 	r = typecheck(r, ctxExpr)
 	r = conv(r, n.Type)
@@ -3527,7 +3539,8 @@ func (n *Node) isIntOrdering() bool {
 // walkinrange optimizes integer-in-range checks, such as 4 <= x && x < 10.
 // n must be an OANDAND or OOROR node.
 // The result of walkinrange MUST be assigned back to n, e.g.
-// 	n.Left = walkinrange(n.Left)
+//
+//	n.Left = walkinrange(n.Left)
 func walkinrange(n *Node, init *Nodes) *Node {
 	// We are looking for something equivalent to a opl b OP b opr c, where:
 	// * a, b, and c have integer type
@@ -3916,7 +3929,8 @@ func candiscard(n *Node) bool {
 var wrapCall_prgen int
 
 // The result of wrapCall MUST be assigned back to n, e.g.
-// 	n.Left = wrapCall(n.Left, init)
+//
+//	n.Left = wrapCall(n.Left, init)
 func wrapCall(n *Node, init *Nodes) *Node {
 	if n.Ninit.Len() != 0 {
 		walkstmtlist(n.Ninit.Slice())
@@ -3956,7 +3970,8 @@ func wrapCall(n *Node, init *Nodes) *Node {
 // successive occurrences of the "any" placeholder in the
 // type syntax expression n.Type.
 // The result of substArgTypes MUST be assigned back to old, e.g.
-// 	n.Left = substArgTypes(n.Left, t1, t2)
+//
+//	n.Left = substArgTypes(n.Left, t1, t2)
 func substArgTypes(old *Node, types_ ...*types.Type) *Node {
 	n := old.copy()
 

@@ -68,7 +68,10 @@ func makechan64(t *chantype, size int64) *hchan {
 	return makechan(t, int(size))
 }
 
+// 创建hchan
 func makechan(t *chantype, size int) *hchan {
+
+	// 获取元素类型
 	elem := t.elem
 
 	// compiler checks this but be safe.
@@ -79,6 +82,8 @@ func makechan(t *chantype, size int) *hchan {
 		throw("makechan: bad alignment")
 	}
 
+	// 根据元素类型和大小，初始化hchan和缓冲区
+	// 如果size等于0，则mem为0，代表是无缓冲
 	mem, overflow := math.MulUintptr(elem.size, uintptr(size))
 	if overflow || mem > maxAlloc-hchanSize || size < 0 {
 		panic(plainError("makechan: size out of range"))
@@ -88,26 +93,33 @@ func makechan(t *chantype, size int) *hchan {
 	// buf points into the same allocation, elemtype is persistent.
 	// SudoG's are referenced from their owning thread so they can't be collected.
 	// TODO(dvyukov,rlh): Rethink when collector can move allocated objects.
+	// 声明hchan
 	var c *hchan
 	switch {
 	case mem == 0:
 		// Queue or element size is zero.
+		// 如果当前 Channel 中不存在缓冲区，那么就只会为 runtime.hchan 分配一段内存空间；
 		c = (*hchan)(mallocgc(hchanSize, nil, true))
 		// Race detector uses this location for synchronization.
 		c.buf = c.raceaddr()
 	case elem.ptrdata == 0:
+		// 如果当前 Channel 中存储的类型不是指针类型，会为当前的 Channel 和底层的数组分配一块连续的内存空间；
 		// Elements do not contain pointers.
 		// Allocate hchan and buf in one call.
 		c = (*hchan)(mallocgc(hchanSize+mem, nil, true))
 		c.buf = add(unsafe.Pointer(c), hchanSize)
 	default:
+		// 在默认情况下会单独为 runtime.hchan 和缓冲区分配内存；
 		// Elements contain pointers.
 		c = new(hchan)
 		c.buf = mallocgc(mem, elem, true)
 	}
 
+	// 元素大小
 	c.elemsize = uint16(elem.size)
+	// 元素类型
 	c.elemtype = elem
+	// 队列长度
 	c.dataqsiz = uint(size)
 
 	if debugChan {
@@ -122,6 +134,7 @@ func chanbuf(c *hchan, i uint) unsafe.Pointer {
 }
 
 // entry point for c <- x from compiled code
+//
 //go:nosplit
 func chansend1(c *hchan, elem unsafe.Pointer) {
 	chansend(c, elem, true, getcallerpc())
@@ -139,11 +152,17 @@ func chansend1(c *hchan, elem unsafe.Pointer) {
  * been closed.  it is easiest to loop and re-run
  * the operation; we'll see that it's now closed.
  */
+// runtime.chansend1 只是调用了 runtime.chansend 并传入 Channel 和需要发送的数据。
 func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
+
+	// 如果c为nil，
 	if c == nil {
+		// 如果是非阻塞的，直接返回
 		if !block {
 			return false
 		}
+
+		// 否则开启阻塞
 		gopark(nil, nil, waitReasonChanSendNilChan, traceEvGoStop, 2)
 		throw("unreachable")
 	}
@@ -180,33 +199,48 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		t0 = cputicks()
 	}
 
+	// 加锁
 	lock(&c.lock)
 
+	// 如果channel已经关闭了，抛出异常
 	if c.closed != 0 {
 		unlock(&c.lock)
 		panic(plainError("send on closed channel"))
 	}
 
+	// 从接收队列中获取一个队列，直接给这个队列发送数据
 	if sg := c.recvq.dequeue(); sg != nil {
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
+
+		// 给这个协程发送数据
 		send(c, sg, ep, func() { unlock(&c.lock) }, 3)
 		return true
 	}
 
+	// 如果没有等待的队列，而且队列中存在空的位置
 	if c.qcount < c.dataqsiz {
 		// Space is available in the channel buffer. Enqueue the element to send.
+		// 添加数据到缓冲队列中
 		qp := chanbuf(c, c.sendx)
 		if raceenabled {
 			raceacquire(qp)
 			racerelease(qp)
 		}
 		typedmemmove(c.elemtype, qp, ep)
+
+		// 队列长度加1
 		c.sendx++
+
+		// 如果发送的索引到达最大长度了，设置到0索引
 		if c.sendx == c.dataqsiz {
 			c.sendx = 0
 		}
+
+		// 队列长度加1
 		c.qcount++
+
+		// 解锁
 		unlock(&c.lock)
 		return true
 	}
@@ -407,6 +441,7 @@ func closechan(c *hchan) {
 }
 
 // entry points for <- c from compiled code
+//
 //go:nosplit
 func chanrecv1(c *hchan, elem unsafe.Pointer) {
 	chanrecv(c, elem, true)
@@ -552,10 +587,11 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 
 // recv processes a receive operation on a full channel c.
 // There are 2 parts:
-// 1) The value sent by the sender sg is put into the channel
-//    and the sender is woken up to go on its merry way.
-// 2) The value received by the receiver (the current G) is
-//    written to ep.
+//  1. The value sent by the sender sg is put into the channel
+//     and the sender is woken up to go on its merry way.
+//  2. The value received by the receiver (the current G) is
+//     written to ep.
+//
 // For synchronous channels, both values are the same.
 // For asynchronous channels, the receiver gets its data from
 // the channel buffer and the sender's data is put in the
@@ -642,7 +678,6 @@ func chanparkcommit(gp *g, chanLock unsafe.Pointer) bool {
 //	} else {
 //		... bar
 //	}
-//
 func selectnbsend(c *hchan, elem unsafe.Pointer) (selected bool) {
 	return chansend(c, elem, false, getcallerpc())
 }
@@ -663,7 +698,6 @@ func selectnbsend(c *hchan, elem unsafe.Pointer) (selected bool) {
 //	} else {
 //		... bar
 //	}
-//
 func selectnbrecv(elem unsafe.Pointer, c *hchan) (selected bool) {
 	selected, _ = chanrecv(c, elem, false)
 	return
@@ -685,7 +719,6 @@ func selectnbrecv(elem unsafe.Pointer, c *hchan) (selected bool) {
 //	} else {
 //		... bar
 //	}
-//
 func selectnbrecv2(elem unsafe.Pointer, received *bool, c *hchan) (selected bool) {
 	// TODO(khr): just return 2 values from this function, now that it is in Go.
 	selected, *received = chanrecv(c, elem, false)
