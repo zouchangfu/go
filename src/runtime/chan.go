@@ -459,6 +459,7 @@ func chanrecv2(c *hchan, elem unsafe.Pointer) (received bool) {
 // Otherwise, if c is closed, zeros *ep and returns (true, false).
 // Otherwise, fills in *ep with an element and returns (true, true).
 // A non-nil ep must point to the heap or the caller's stack.
+// 接收数据
 func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
 	// raceenabled: don't need to check ep, as it is always on the stack
 	// or is new memory allocated by reflect.
@@ -467,6 +468,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		print("chanrecv: chan=", c, "\n")
 	}
 
+	// 如果c为nil，阻塞等待
 	if c == nil {
 		if !block {
 			return
@@ -498,12 +500,15 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		t0 = cputicks()
 	}
 
+	// 加锁
 	lock(&c.lock)
 
+	// 如果channel已经关闭并且队列中已经没有数据
 	if c.closed != 0 && c.qcount == 0 {
 		if raceenabled {
 			raceacquire(c.raceaddr())
 		}
+		// 解锁
 		unlock(&c.lock)
 		if ep != nil {
 			typedmemclr(c.elemtype, ep)
@@ -511,6 +516,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, false
 	}
 
+	// 如果发送队列中有数据，直接给发送队列发送数据
 	if sg := c.sendq.dequeue(); sg != nil {
 		// Found a waiting sender. If buffer is size 0, receive value
 		// directly from sender. Otherwise, receive from head of queue
@@ -520,6 +526,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, true
 	}
 
+	// 如果队列存在数据
 	if c.qcount > 0 {
 		// Receive directly from queue
 		qp := chanbuf(c, c.recvx)
@@ -531,11 +538,19 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 			typedmemmove(c.elemtype, ep, qp)
 		}
 		typedmemclr(c.elemtype, qp)
+
+		// 接收索引加1
 		c.recvx++
+
+		// 如果读到最后了，索引设置为0
 		if c.recvx == c.dataqsiz {
 			c.recvx = 0
 		}
+
+		// 数量减一
 		c.qcount--
+
+		// 解锁
 		unlock(&c.lock)
 		return true, true
 	}
